@@ -208,21 +208,6 @@ def main():
     save_state(state)
     generate_html_report(results, total_profit, total_value, total_cost, total_accumulated_profit, total_accum_rate)
 
-    # ⭐ 生成净值数据 JSON，供 calculator.html 使用
-    nav_json = {}
-    for code, cfg in FUND_CONFIG.items():
-        nav_data = fetch_fund_nav_from_api(code)
-        if nav_data and len(nav_data) >= 2:
-            nav_json[code] = {
-                "name": cfg['name'],
-                "latest_nav": nav_data[0]['nav'],
-                "latest_date": nav_data[0]['date'],
-                "prev_nav": nav_data[1]['nav']
-            }
-    with open("nav_data.json", "w", encoding="utf-8") as f:
-        json.dump(nav_json, f, indent=2, ensure_ascii=False)
-    print("✅ 净值数据已保存: nav_data.json")
-
     print("✅ 报告已生成: index.html")
 
 if __name__ == "__main__":
