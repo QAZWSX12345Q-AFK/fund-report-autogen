@@ -11,7 +11,7 @@ STATE_FILE = "state.json"
 def fetch_fund_nav_from_api(fund_code):
     url = f"http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code={fund_code}&page=1&per=20"
     try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        headers = {"User-Agent": "Mozilla/5.0"}
         response = requests.get(url, headers=headers, timeout=10)
         response.encoding = "utf-8"
         html = response.text
@@ -33,7 +33,7 @@ def fetch_fund_nav_from_api(fund_code):
         print(f"⚠️ 从 API 获取 {fund_code} 数据失败: {e}")
         return None
 
-# ---------- 状态管理 ----------
+# ---------- 状态管理（含累计成本） ----------
 def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, 'r', encoding='utf-8') as f:
@@ -43,7 +43,7 @@ def load_state():
         state[code] = {
             "shares": cfg["initial_shares"],
             "last_date": None,
-            "total_cost": cfg.get("initial_cost", 0.0)
+            "total_cost": cfg.get("initial_cost", 0.0)   # ⭐ 初始化累计本金
         }
     return state
 
@@ -70,12 +70,12 @@ def update_shares(state, code, cfg, latest_nav_info):
     daily_amount = cfg["daily_invest"]
     added = daily_amount / nav
     current["shares"] += added
-    current["total_cost"] += daily_amount
+    current["total_cost"] += daily_amount   # ⭐ 累加本金
     current["last_date"] = today_date
     print(f"   ✅ 定投 {daily_amount}元，净值 {nav:.4f}，购入 {added:.4f} 份")
     return added
 
-def generate_html_report(results, total_profit, total_value, total_cost, total_accumulated_profit, total_accum_rate):
+def generate_html_report(results, total_profit, total_value, total_cost, total_accumulated_profit):
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -112,17 +112,14 @@ def generate_html_report(results, total_profit, total_value, total_cost, total_a
             </div>
             <div style="margin-top:5px;">
                 <span style="font-size:14px; class="{accum_class}">📊 累计收益: {r['accum_profit']:+.2f} 元</span>
-                <span style="margin-left:20px; color:#333;">📈 累计收益率: <span class="{accum_class}">{r['accum_rate']:+.2f}%</span></span>
                 <span style="margin-left:20px; color:#666;">（本金: {r['total_cost']:.2f} 元）</span>
             </div>
         </div>
         """
-    total_accum_class = "profit-positive" if total_accumulated_profit >= 0 else "profit-negative"
     html += f"""
         <div class="summary">
             <h2>💰 今日总收益: <span class="{"profit-positive" if total_profit >= 0 else "profit-negative"}">{total_profit:+.2f} 元</span></h2>
-            <h2>📈 累计总收益: <span class="{total_accum_class}">{total_accumulated_profit:+.2f} 元</span></h2>
-            <h2>📈 累计总收益率: <span class="{total_accum_class}">{total_accum_rate:+.2f}%</span></h2>
+            <h2>📈 累计总收益: <span class="{"profit-positive" if total_accumulated_profit >= 0 else "profit-negative"}">{total_accumulated_profit:+.2f} 元</span></h2>
             <h2>💵 账户总市值: {total_value:.2f} 元</h2>
             <h2>💳 累计总本金: {total_cost:.2f} 元</h2>
         </div>
@@ -168,8 +165,7 @@ def main():
         total_cost_fund = state[code]["total_cost"]
         daily_profit = (latest_nav - prev_nav) * shares
         market_value = latest_nav * shares
-        accum_profit = market_value - total_cost_fund
-        accum_rate = (accum_profit / total_cost_fund * 100) if total_cost_fund > 0 else 0.0
+        accum_profit = market_value - total_cost_fund   # ⭐ 累计收益
 
         total_profit += daily_profit
         total_value += market_value
@@ -177,7 +173,7 @@ def main():
 
         print(f"   📊 份额: {shares:.2f} | 净值: {latest_nav:.4f} | 前日: {prev_nav:.4f}")
         print(f"   📈 今日收益: {daily_profit:+.2f} 元 | 市值: {market_value:.2f} 元")
-        print(f"   📊 累计收益: {accum_profit:+.2f} 元 | 收益率: {accum_rate:+.2f}% (本金: {total_cost_fund:.2f})")
+        print(f"   📊 累计收益: {accum_profit:+.2f} 元 (本金: {total_cost_fund:.2f})")
         print("-" * 40)
 
         results.append({
@@ -190,24 +186,19 @@ def main():
             "profit": daily_profit,
             "market_value": market_value,
             "total_cost": total_cost_fund,
-            "accum_profit": accum_profit,
-            "accum_rate": accum_rate
+            "accum_profit": accum_profit
         })
 
     total_accumulated_profit = total_value - total_cost
-    total_accum_rate = (total_accumulated_profit / total_cost * 100) if total_cost > 0 else 0.0
-
     print(f"\n{'='*55}")
     print(f"💰 今日账户总收益: {total_profit:+.2f} 元")
     print(f"📈 累计总收益: {total_accumulated_profit:+.2f} 元")
-    print(f"📈 累计总收益率: {total_accum_rate:+.2f}%")
     print(f"💵 账户总市值: {total_value:.2f} 元")
     print(f"💳 累计总本金: {total_cost:.2f} 元")
     print(f"{'='*55}\n")
 
     save_state(state)
-    generate_html_report(results, total_profit, total_value, total_cost, total_accumulated_profit, total_accum_rate)
-
+    generate_html_report(results, total_profit, total_value, total_cost, total_accumulated_profit)
     print("✅ 报告已生成: index.html")
 
 if __name__ == "__main__":
