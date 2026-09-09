@@ -1,39 +1,71 @@
-import akshare as ak
+import requests
 import pandas as pd
 import json
 import os
+import time
+import random
 from datetime import datetime
 from config import FUND_CONFIG
 
 STATE_FILE = "state.json"
 
-# ---------- 工具函数：使用 akshare 获取净值 ----------
-def fetch_fund_nav_from_api(fund_code):
+# ---------- 带重试的净值获取 ----------
+def fetch_fund_nav_from_api(fund_code, max_retries=3):
     """
-    使用 akshare 库获取基金历史净值
+    直接请求天天基金API，带重试和随机延迟
     """
-    try:
-        df = ak.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
-        if df is None or df.empty:
-            print(f"   ⚠️ 返回数据为空")
-            return None
+    for attempt in range(max_retries):
+        try:
+            # 随机延迟，避免请求太快被封
+            if attempt > 0:
+                wait_time = random.uniform(2, 5)
+                print(f"   ⏳ 第 {attempt+1} 次重试，等待 {wait_time:.1f} 秒...")
+                time.sleep(wait_time)
+            else:
+                # 第一次请求也稍作延迟，模拟人类
+                time.sleep(random.uniform(0.5, 1.5))
+            
+            url = f"https://api.fund.eastmoney.com/f10/lsjz?fundCode={fund_code}&pageIndex=1&pageSize=10&_={int(time.time()*1000)}"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": "https://fund.eastmoney.com/",
+                "Accept": "application/json",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Connection": "keep-alive",
+            }
+            response = requests.get(url, headers=headers, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("Data") and data["Data"].get("LSJZList"):
+                    nav_list = []
+                    for item in data["Data"]["LSJZList"]:
+                        if item.get("DWJZ") and item.get("FSRQ"):
+                            nav_float = float(item["DWJZ"])
+                            if nav_float > 0:
+                                nav_list.append({
+                                    "date": item["FSRQ"],
+                                    "nav": nav_float
+                                })
+                    if len(nav_list) >= 2:
+                        print(f"   ✅ 获取成功！最新净值: {nav_list[0]['nav']:.4f} ({nav_list[0]['date']})")
+                        return nav_list
+                    else:
+                        print(f"   ⚠️ 数据不足，仅 {len(nav_list)} 条 (尝试 {attempt+1}/{max_retries})")
+                else:
+                    print(f"   ⚠️ 数据格式异常 (尝试 {attempt+1}/{max_retries})")
+            else:
+                print(f"   ⚠️ HTTP {response.status_code} (尝试 {attempt+1}/{max_retries})")
+                
+        except Exception as e:
+            print(f"   ⚠️ 尝试 {attempt+1}/{max_retries} 失败: {e}")
         
-        # 按日期降序排列，取最新两条
-        df = df.sort_values('净值日期', ascending=False)
-        if len(df) < 2:
-            print(f"   ⚠️ 数据不足，仅获取到 {len(df)} 条")
+        if attempt == max_retries - 1:
+            print(f"   ❌ 所有 {max_retries} 次尝试均失败")
             return None
-        
-        nav_list = []
-        for _, row in df.iterrows():
-            nav_list.append({
-                "date": row['净值日期'].strftime('%Y-%m-%d'),
-                "nav": float(row['单位净值'])
-            })
-        return nav_list
-    except Exception as e:
-        print(f"   ⚠️ 使用 akshare 获取 {fund_code} 数据失败: {e}")
-        return None
+    
+    return None
 
 # ---------- 状态管理 ----------
 def load_state():
@@ -153,7 +185,7 @@ def main():
 
         nav_data = fetch_fund_nav_from_api(code)
         if not nav_data or len(nav_data) < 2:
-            print(f"   ❌ 获取净值数据失败（数据不足），跳过\n")
+            print(f"   ❌ 获取净值数据失败，跳过\n")
             continue
 
         latest = nav_data[0]
@@ -163,7 +195,6 @@ def main():
         prev_nav = previous['nav']
 
         print(f"   📅 最新净值日期: {latest_date}")
-        print(f"   📊 最新净值: {latest_nav:.4f}, 前日净值: {prev_nav:.4f}")
 
         update_shares(state, code, cfg, {"date": latest_date, "nav": latest_nav})
 
@@ -211,7 +242,7 @@ def main():
     save_state(state)
     generate_html_report(results, total_profit, total_value, total_cost, total_accumulated_profit, total_accum_rate)
 
-    # 生成 nav_data.json 供 calculator.html 使用
+    # 生成 nav_data.json
     nav_json = {}
     for code, cfg in FUND_CONFIG.items():
         nav_data = fetch_fund_nav_from_api(code)
