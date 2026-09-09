@@ -8,7 +8,6 @@ from config import FUND_CONFIG
 STATE_FILE = "state.json"
 
 def load_state():
-    """读取或初始化持仓状态"""
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, 'r', encoding='utf-8') as f:
             return json.load(f)
@@ -25,7 +24,6 @@ def save_state(state):
         json.dump(state, f, indent=2, ensure_ascii=False)
 
 def get_latest_nav_info(code):
-    """获取最新净值及日期"""
     try:
         df = ak.fund_open_fund_info_em(symbol=code, indicator="单位净值走势")
         if df is None or len(df) == 0:
@@ -40,7 +38,6 @@ def get_latest_nav_info(code):
         return None
 
 def get_previous_nav(code):
-    """获取前一日净值"""
     try:
         df = ak.fund_open_fund_info_em(symbol=code, indicator="单位净值走势")
         if df is None or len(df) < 2:
@@ -52,23 +49,19 @@ def get_previous_nav(code):
         return None
 
 def update_shares(state, code, cfg, today_info):
-    """自动定投：根据净值更新份额（暂停申购的自动跳过）"""
     today_date = today_info['date']
     nav = today_info['nav']
     current = state[code]
     last_date = current.get("last_date")
     
-    # 如果今天净值日期和上次一样，说明没有新数据
     if last_date == today_date:
         return 0
     
-    # 检查是否暂停申购
     if cfg.get("paused", False):
         print(f"   ⏸️  {cfg['name']} 已暂停申购，今日不加份额")
         current["last_date"] = today_date
         return 0
     
-    # 自动定投：新增份额 = 定投金额 / 最新净值
     daily_amount = cfg["daily_invest"]
     added = daily_amount / nav
     current["shares"] += added
@@ -77,7 +70,6 @@ def update_shares(state, code, cfg, today_info):
     return added
 
 def generate_html_report(results, total_profit, total_value):
-    """生成HTML报告"""
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -139,22 +131,18 @@ def main():
     for code, cfg in FUND_CONFIG.items():
         print(f"🔍 正在处理 {cfg['name']} ({code})...")
         
-        # 获取最新净值
         today_info = get_latest_nav_info(code)
         if not today_info:
             print(f"   ❌ 获取净值失败，跳过\n")
             continue
         
-        # 获取前一日净值
         prev_nav = get_previous_nav(code)
         if prev_nav is None:
             print(f"   ❌ 获取前日净值失败，跳过\n")
             continue
         
-        # 更新定投份额
         update_shares(state, code, cfg, today_info)
         
-        # 计算收益
         shares = state[code]["shares"]
         latest_nav = today_info["nav"]
         daily_profit = (latest_nav - prev_nav) * shares
@@ -183,9 +171,7 @@ def main():
     print(f"💵 账户总市值: {total_value:.2f} 元")
     print(f"{'='*55}\n")
     
-    # 保存状态
     save_state(state)
-    # 生成HTML报告
     generate_html_report(results, total_profit, total_value)
     print("✅ 报告已生成: index.html")
 
