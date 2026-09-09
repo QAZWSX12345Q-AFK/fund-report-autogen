@@ -1,4 +1,4 @@
-import requests
+import akshare as ak
 import pandas as pd
 import json
 import os
@@ -7,46 +7,32 @@ from config import FUND_CONFIG
 
 STATE_FILE = "state.json"
 
-# ---------- 工具函数：使用稳定的JSON接口 ----------
+# ---------- 工具函数：使用 akshare 获取净值 ----------
 def fetch_fund_nav_from_api(fund_code):
+    """
+    使用 akshare 库获取基金历史净值
+    """
     try:
-        url = f"https://api.fund.eastmoney.com/f10/lsjz?fundCode={fund_code}&pageIndex=1&pageSize=10&startDate=&endDate=&_={int(datetime.now().timestamp()*1000)}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": "https://fund.eastmoney.com/",
-        }
-        response = requests.get(url, headers=headers, timeout=15)
-        response.encoding = "utf-8"
+        df = ak.fund_open_fund_info_em(symbol=fund_code, indicator="单位净值走势")
+        if df is None or df.empty:
+            print(f"   ⚠️ 返回数据为空")
+            return None
         
-        if response.status_code != 200:
-            print(f"   ⚠️ HTTP状态码: {response.status_code}")
+        # 按日期降序排列，取最新两条
+        df = df.sort_values('净值日期', ascending=False)
+        if len(df) < 2:
+            print(f"   ⚠️ 数据不足，仅获取到 {len(df)} 条")
             return None
-            
-        data = response.json()
-        if not data.get("Data") or not data["Data"].get("LSJZList"):
-            print(f"   ⚠️ 返回数据格式异常")
-            return None
-            
+        
         nav_list = []
-        for item in data["Data"]["LSJZList"]:
-            if item.get("DWJZ") and item.get("FSRQ"):
-                try:
-                    nav_float = float(item["DWJZ"])
-                    if nav_float > 0:
-                        nav_list.append({
-                            "date": item["FSRQ"],
-                            "nav": nav_float
-                        })
-                except ValueError:
-                    continue
-        
-        if len(nav_list) < 2:
-            print(f"   ⚠️ 数据不足，仅获取到 {len(nav_list)} 条")
-            return None
-            
+        for _, row in df.iterrows():
+            nav_list.append({
+                "date": row['净值日期'].strftime('%Y-%m-%d'),
+                "nav": float(row['单位净值'])
+            })
         return nav_list
     except Exception as e:
-        print(f"   ⚠️ 从 API 获取 {fund_code} 数据失败: {e}")
+        print(f"   ⚠️ 使用 akshare 获取 {fund_code} 数据失败: {e}")
         return None
 
 # ---------- 状态管理 ----------
