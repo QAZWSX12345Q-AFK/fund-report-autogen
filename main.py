@@ -9,26 +9,17 @@ STATE_FILE = "state.json"
 
 # ---------- 工具函数：直接从天天基金 API 获取净值 ----------
 def fetch_fund_nav_from_api(fund_code):
-    """
-    从天天基金移动端 API 获取基金历史净值。
-    返回按日期降序排列的列表，每条记录包含 'date' 和 'nav'。
-    """
     url = f"http://fund.eastmoney.com/f10/F10DataApi.aspx?type=lsjz&code={fund_code}&page=1&per=20"
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-        }
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         response = requests.get(url, headers=headers, timeout=10)
         response.encoding = "utf-8"
         html = response.text
-
-        # 解析表格数据（简易解析，提取日期和单位净值）
         import re
         pattern = r"(\d{4}-\d{2}-\d{2})<\/td><td>([\d.]+)<\/td>"
         matches = re.findall(pattern, html)
         if not matches:
             return None
-
         nav_list = []
         for date_str, nav_str in matches:
             try:
@@ -36,8 +27,6 @@ def fetch_fund_nav_from_api(fund_code):
                 nav_list.append({"date": date_str, "nav": nav_float})
             except ValueError:
                 continue
-
-        # 按日期降序排列（最新的在前）
         nav_list = sorted(nav_list, key=lambda x: x["date"], reverse=True)
         return nav_list
     except Exception as e:
@@ -53,7 +42,8 @@ def load_state():
     for code, cfg in FUND_CONFIG.items():
         state[code] = {
             "shares": cfg["initial_shares"],
-            "last_date": None
+            "last_date": None,
+            "total_cost": cfg.get("initial_cost", 0.0)
         }
     return state
 
@@ -63,35 +53,29 @@ def save_state(state):
 
 # ---------- 核心逻辑 ----------
 def update_shares(state, code, cfg, latest_nav_info):
-    """
-    根据净值日期自动推算定投份额。
-    只有当前净值日期与上次记录的日期不同，才执行加仓。
-    """
     today_date = latest_nav_info['date']
     nav = latest_nav_info['nav']
     current = state[code]
     last_date = current.get("last_date")
 
-    # 如果净值日期没有变化，说明今天没有新数据，不加仓
     if last_date == today_date:
         print(f"   ℹ️ 净值日期 {today_date} 未更新，今日不加份额")
         return 0
 
-    # 检查是否暂停申购
     if cfg.get("paused", False):
         print(f"   ⏸️  {cfg['name']} 已暂停申购，今日不加份额")
         current["last_date"] = today_date
         return 0
 
-    # 执行定投：新增份额 = 定投金额 / 最新净值
     daily_amount = cfg["daily_invest"]
     added = daily_amount / nav
     current["shares"] += added
+    current["total_cost"] += daily_amount
     current["last_date"] = today_date
     print(f"   ✅ 定投 {daily_amount}元，净值 {nav:.4f}，购入 {added:.4f} 份")
     return added
 
-def generate_html_report(results, total_profit, total_value):
+def generate_html_report(results, total_profit, total_value, total_cost, total_accumulated_profit, total_accum_rate):
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -117,6 +101,7 @@ def generate_html_report(results, total_profit, total_value):
 """
     for r in results:
         profit_class = "profit-positive" if r['profit'] >= 0 else "profit-negative"
+        accum_class = "profit-positive" if r['accum_profit'] >= 0 else "profit-negative"
         html += f"""
         <div class="fund-item">
             <div class="fund-name">【{r['name']}】({r['code']})</div>
@@ -125,12 +110,21 @@ def generate_html_report(results, total_profit, total_value):
                 <span style="font-size:16px; font-weight:bold; class="{profit_class}">📈 今日收益: {r['profit']:+.2f} 元</span>
                 <span style="margin-left:20px; color:#333;">💰 持仓市值: {r['market_value']:.2f} 元</span>
             </div>
+            <div style="margin-top:5px;">
+                <span style="font-size:14px; class="{accum_class}">📊 累计收益: {r['accum_profit']:+.2f} 元</span>
+                <span style="margin-left:20px; color:#333;">📈 累计收益率: <span class="{accum_class}">{r['accum_rate']:+.2f}%</span></span>
+                <span style="margin-left:20px; color:#666;">（本金: {r['total_cost']:.2f} 元）</span>
+            </div>
         </div>
         """
+    total_accum_class = "profit-positive" if total_accumulated_profit >= 0 else "profit-negative"
     html += f"""
         <div class="summary">
             <h2>💰 今日总收益: <span class="{"profit-positive" if total_profit >= 0 else "profit-negative"}">{total_profit:+.2f} 元</span></h2>
+            <h2>📈 累计总收益: <span class="{total_accum_class}">{total_accumulated_profit:+.2f} 元</span></h2>
+            <h2>📈 累计总收益率: <span class="{total_accum_class}">{total_accum_rate:+.2f}%</span></h2>
             <h2>💵 账户总市值: {total_value:.2f} 元</h2>
+            <h2>💳 累计总本金: {total_cost:.2f} 元</h2>
         </div>
     </div>
 </body>
@@ -149,12 +143,12 @@ def main():
     state = load_state()
     total_profit = 0.0
     total_value = 0.0
+    total_cost = 0.0
     results = []
 
     for code, cfg in FUND_CONFIG.items():
         print(f"🔍 正在处理 {cfg['name']} ({code})...")
 
-        # 1. 从 API 获取净值数据
         nav_data = fetch_fund_nav_from_api(code)
         if not nav_data or len(nav_data) < 2:
             print(f"   ❌ 获取净值数据失败（数据不足），跳过\n")
@@ -162,26 +156,28 @@ def main():
 
         latest = nav_data[0]
         previous = nav_data[1]
-
         latest_date = latest['date']
         latest_nav = latest['nav']
         prev_nav = previous['nav']
 
         print(f"   📅 最新净值日期: {latest_date}")
 
-        # 2. 更新定投份额（只有净值日期变化时才加仓）
         update_shares(state, code, cfg, {"date": latest_date, "nav": latest_nav})
 
-        # 3. 计算收益
         shares = state[code]["shares"]
+        total_cost_fund = state[code]["total_cost"]
         daily_profit = (latest_nav - prev_nav) * shares
         market_value = latest_nav * shares
+        accum_profit = market_value - total_cost_fund
+        accum_rate = (accum_profit / total_cost_fund * 100) if total_cost_fund > 0 else 0.0
 
         total_profit += daily_profit
         total_value += market_value
+        total_cost += total_cost_fund
 
         print(f"   📊 份额: {shares:.2f} | 净值: {latest_nav:.4f} | 前日: {prev_nav:.4f}")
         print(f"   📈 今日收益: {daily_profit:+.2f} 元 | 市值: {market_value:.2f} 元")
+        print(f"   📊 累计收益: {accum_profit:+.2f} 元 | 收益率: {accum_rate:+.2f}% (本金: {total_cost_fund:.2f})")
         print("-" * 40)
 
         results.append({
@@ -192,16 +188,41 @@ def main():
             "latest_date": latest_date,
             "prev_nav": prev_nav,
             "profit": daily_profit,
-            "market_value": market_value
+            "market_value": market_value,
+            "total_cost": total_cost_fund,
+            "accum_profit": accum_profit,
+            "accum_rate": accum_rate
         })
+
+    total_accumulated_profit = total_value - total_cost
+    total_accum_rate = (total_accumulated_profit / total_cost * 100) if total_cost > 0 else 0.0
 
     print(f"\n{'='*55}")
     print(f"💰 今日账户总收益: {total_profit:+.2f} 元")
+    print(f"📈 累计总收益: {total_accumulated_profit:+.2f} 元")
+    print(f"📈 累计总收益率: {total_accum_rate:+.2f}%")
     print(f"💵 账户总市值: {total_value:.2f} 元")
+    print(f"💳 累计总本金: {total_cost:.2f} 元")
     print(f"{'='*55}\n")
 
     save_state(state)
-    generate_html_report(results, total_profit, total_value)
+    generate_html_report(results, total_profit, total_value, total_cost, total_accumulated_profit, total_accum_rate)
+
+    # ⭐ 生成净值数据 JSON，供 calculator.html 使用
+    nav_json = {}
+    for code, cfg in FUND_CONFIG.items():
+        nav_data = fetch_fund_nav_from_api(code)
+        if nav_data and len(nav_data) >= 2:
+            nav_json[code] = {
+                "name": cfg['name'],
+                "latest_nav": nav_data[0]['nav'],
+                "latest_date": nav_data[0]['date'],
+                "prev_nav": nav_data[1]['nav']
+            }
+    with open("nav_data.json", "w", encoding="utf-8") as f:
+        json.dump(nav_json, f, indent=2, ensure_ascii=False)
+    print("✅ 净值数据已保存: nav_data.json")
+
     print("✅ 报告已生成: index.html")
 
 if __name__ == "__main__":
