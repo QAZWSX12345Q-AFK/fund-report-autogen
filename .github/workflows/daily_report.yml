@@ -48,7 +48,7 @@ jobs:
 
       # 步骤4：运行我们的报告生成脚本
       - name: Run script to generate report
-        run: python query_fund_nav.py
+        run: python main.py
 
       # 步骤5：上传工件
       - name: Upload artifact
