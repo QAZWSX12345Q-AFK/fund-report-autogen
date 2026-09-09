@@ -2,3 +2,5 @@ akshare
 pandas
 plotly
 tushare>=1.3.9 
+akshare
+pandas
