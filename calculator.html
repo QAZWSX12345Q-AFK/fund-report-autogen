@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>基金收益计算器</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f5f7fa;
+            padding: 16px;
+            margin: 0;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            font-size: 22px;
+            color: #1a2332;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        h1 small {
+            font-size: 14px;
+            font-weight: normal;
+            color: #8895aa;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 16px 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .fund-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #f0f2f5;
+        }
+        .fund-row:last-child { border-bottom: none; }
+        .fund-row input {
+            padding: 8px 10px;
+            border: 1px solid #d0d7de;
+            border-radius: 8px;
+            font-size: 14px;
+            flex: 1;
+            min-width: 80px;
+            background: #fafbfc;
+        }
+        .fund-row input:focus {
+            outline: none;
+            border-color: #4f8cf7;
+            background: white;
+        }
+        .fund-row .code-input { flex: 0.8; min-width: 90px; }
+        .fund-row .shares-input { flex: 0.9; min-width: 100px; }
+        .fund-row .cost-input { flex: 0.9; min-width: 100px; }
+        .fund-row .remove-btn {
+            background: none;
+            border: none;
+            color: #d73a49;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 4px 8px;
+        }
+        .fund-row .remove-btn:hover { opacity: 0.6; }
+        .btn {
+            padding: 10px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: #4f8cf7;
+            color: white;
+        }
+        .btn-primary:hover { background: #3a7ae8; }
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .btn-outline {
+            background: transparent;
+            color: #4f8cf7;
+            border: 1.5px solid #4f8cf7;
+        }
+        .btn-outline:hover { background: #f0f5ff; }
+        .btn-group {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+        .result-item {
+            padding: 12px 0;
+            border-bottom: 1px solid #f0f2f5;
+        }
+        .result-item:last-child { border-bottom: none; }
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+            font-size: 16px;
+        }
+        .result-detail {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 6px 20px;
+            margin-top: 6px;
+            font-size: 14px;
+            color: #3d4a5c;
+        }
+        .result-detail span { display: flex; align-items: center; gap: 4px; }
+        .positive { color: #e53935; }
+        .negative { color: #43a047; }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            text-align: center;
+        }
+        .summary-grid .stat {
+            background: #f8f9fc;
+            padding: 12px 8px;
+            border-radius: 8px;
+        }
+        .summary-grid .stat .num {
+            font-size: 22px;
+            font-weight: 700;
+        }
+        .summary-grid .stat .label {
+            font-size: 13px;
+            color: #8895aa;
+            margin-top: 2px;
+        }
+        .loading {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #d0d7de;
+            border-top-color: #4f8cf7;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .empty-tip { color: #8895aa; text-align: center; padding: 30px 0; }
+        .footer { margin-top: 20px; text-align: center; color: #b0bccd; font-size: 13px; }
+        @media (max-width: 600px) {
+            .fund-row input { min-width: 60px; font-size: 13px; padding: 6px 8px; }
+            .fund-row .code-input { min-width: 70px; flex: 0.6; }
+            .summary-grid { grid-template-columns: repeat(2, 1fr); }
+            .result-detail { grid-template-columns: 1fr 1fr; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <h1>📊 基金收益计算器 <small>实时获取最新净值</small></h1>
+        <p style="color:#8895aa; margin: -6px 0 12px 0; font-size:14px;">
+            输入基金代码、持有份额和持仓成本，点击计算即可查看当日收益和累计收益
+        </p>
+    </div>
+
+    <!-- 输入区 -->
+    <div class="card" id="inputArea">
+        <div id="fundList">
+            <!-- 由 JS 动态渲染 -->
+        </div>
+        <div class="btn-group" style="margin-top:14px;">
+            <button class="btn btn-outline" id="addBtn">＋ 添加基金</button>
+            <button class="btn btn-primary" id="calcBtn">📈 计算收益</button>
+        </div>
+    </div>
+
+    <!-- 结果区 -->
+    <div class="card" id="resultArea" style="display:none;">
+        <div id="resultSummary"></div>
+        <div id="resultDetail"></div>
+    </div>
+
+    <div class="footer">数据来源：天天基金网 · 仅供估算参考</div>
+</div>
+
+<script>
+// ============================================================
+// 配置：默认预填三只基金（可修改或删除）
+// ============================================================
+const DEFAULT_FUNDS = [
+    { code: "021778", shares: 359.16, cost: 3000 },
+    { code: "160213", shares: 190.75, cost: 2000 },
+    { code: "018738", shares: 269.19, cost: 1500 },
+];
+
+let funds = [];
+
+// ============================================================
+// 核心：从天天基金 API 获取净值（返回最新2条）
+// ============================================================
+async function fetchNav(fundCode) {
+    const url = `https://api.fund.eastmoney.com/f10/lsjz?callback=jQuery&fundCode=${fundCode}&pageIndex=1&pageSize=5&startDate=&endDate=&_=${Date.now()}`;
+    try {
+        const resp = await fetch(url, {
+            headers: { "Referer": "https://fund.eastmoney.com/" }
+        });
+        const text = await resp.text();
+        // 解析 JSONP（去掉 callback 包裹）
+        const jsonMatch = text.match(/jQuery\d+_?\d*\((.*)\)/);
+        if (!jsonMatch) return null;
+        const data = JSON.parse(jsonMatch[1]);
+        if (!data.Data || !data.Data.LSJZList || data.Data.LSJZList.length < 2) return null;
+        const list = data.Data.LSJZList;
+        const navList = list.map(item => ({
+            date: item.FSRQ,
+            nav: parseFloat(item.DWJZ)
+        }));
+        return navList; // 已按日期降序（最新在前）
+    } catch (e) {
+        console.warn("fetchNav error:", e);
+        return null;
+    }
+}
+
+// ============================================================
+// 渲染函数
+// ============================================================
+function renderInputs() {
+    const container = document.getElementById('fundList');
+    if (funds.length === 0) {
+        container.innerHTML = `<div class="empty-tip">还没有基金，点击下方「添加基金」开始</div>`;
+        return;
+    }
+    let html = '';
+    funds.forEach((f, idx) => {
+        html += `
+            <div class="fund-row" data-index="${idx}">
+                <input class="code-input" type="text" value="${f.code}" placeholder="基金代码" data-field="code">
+                <input class="shares-input" type="number" step="0.01" value="${f.shares}" placeholder="持有份额" data-field="shares">
+                <input class="cost-input" type="number" step="0.01" value="${f.cost}" placeholder="持仓成本(元)" data-field="cost">
+                <button class="remove-btn" data-index="${idx}" title="删除">✕</button>
+            </div>
+        `;
+    });
+    container.innerHTML = html;
+
+    // 绑定事件：实时更新 funds 数据
+    container.querySelectorAll('.fund-row').forEach(row => {
+        const idx = parseInt(row.dataset.index);
+        row.querySelectorAll('input').forEach(inp => {
+            inp.addEventListener('input', () => {
+                const field = inp.dataset.field;
+                const val = inp.type === 'number' ? parseFloat(inp.value) || 0 : inp.value.trim();
+                funds[idx][field] = val;
+            });
+        });
+        const delBtn = row.querySelector('.remove-btn');
+        delBtn.addEventListener('click', () => {
+            funds.splice(idx, 1);
+            renderInputs();
+            hideResults();
+        });
+    });
+}
+
+function hideResults() {
+    document.getElementById('resultArea').style.display = 'none';
+}
+
+function showResults(results, summary) {
+    const area = document.getElementById('resultArea');
+    area.style.display = 'block';
+
+    // 汇总
+    const summaryHtml = `
+        <div class="summary-grid">
+            <div class="stat">
+                <div class="num ${summary.totalProfit >= 0 ? 'positive' : 'negative'}">${summary.totalProfit >= 0 ? '+' : ''}${summary.totalProfit.toFixed(2)}</div>
+                <div class="label">今日总收益 (元)</div>
+            </div>
+            <div class="stat">
+                <div class="num ${summary.totalAccumProfit >= 0 ? 'positive' : 'negative'}">${summary.totalAccumProfit >= 0 ? '+' : ''}${summary.totalAccumProfit.toFixed(2)}</div>
+                <div class="label">累计总收益 (元)</div>
+            </div>
+            <div class="stat">
+                <div class="num ${summary.totalAccumRate >= 0 ? 'positive' : 'negative'}">${summary.totalAccumRate >= 0 ? '+' : ''}${summary.totalAccumRate.toFixed(2)}%</div>
+                <div class="label">累计总收益率</div>
+            </div>
+            <div class="stat">
+                <div class="num">${summary.totalMarketValue.toFixed(2)}</div>
+                <div class="label">账户总市值 (元)</div>
+            </div>
+            <div class="stat">
+                <div class="num">${summary.totalCost.toFixed(2)}</div>
+                <div class="label">累计总本金 (元)</div>
+            </div>
+        </div>
+    `;
+    document.getElementById('resultSummary').innerHTML = summaryHtml;
+
+    // 明细
+    let detailHtml = '';
+    results.forEach(r => {
+        const profitCls = r.profit >= 0 ? 'positive' : 'negative';
+        const accumCls = r.accumProfit >= 0 ? 'positive' : 'negative';
+        detailHtml += `
+            <div class="result-item">
+                <div class="result-header">
+                    <span>【${r.name || r.code}】(${r.code})</span>
+                    <span class="${profitCls}">今日 ${r.profit >= 0 ? '+' : ''}${r.profit.toFixed(2)} 元</span>
+                </div>
+                <div class="result-detail">
+                    <span>📅 净值: ${r.nav.toFixed(4)} (${r.date})</span>
+                    <span>📊 前日净值: ${r.prevNav.toFixed(4)}</span>
+                    <span>💰 市值: ${r.marketValue.toFixed(2)} 元</span>
+                    <span>📈 累计收益: <span class="${accumCls}">${r.accumProfit >= 0 ? '+' : ''}${r.accumProfit.toFixed(2)} 元</span></span>
+                    <span>📈 累计收益率: <span class="${accumCls}">${r.accumRate >= 0 ? '+' : ''}${r.accumRate.toFixed(2)}%</span></span>
+                    <span>💳 本金: ${r.cost.toFixed(2)} 元</span>
+                    <span>📦 份额: ${r.shares.toFixed(2)}</span>
+                </div>
+            </div>
+        `;
+    });
+    document.getElementById('resultDetail').innerHTML = detailHtml;
+}
+
+// ============================================================
+// 计算主逻辑
+// ============================================================
+async function calculate() {
+    const btn = document.getElementById('calcBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading"></span> 计算中...';
+
+    const validFunds = funds.filter(f => f.code && f.shares > 0 && f.cost > 0);
+    if (validFunds.length === 0) {
+        alert('请至少添加一只有效的基金（代码、份额、成本不能为空）');
+        btn.disabled = false;
+        btn.innerHTML = '📈 计算收益';
+        return;
+    }
+
+    const results = [];
+    let totalProfit = 0, totalAccumProfit = 0, totalMarketValue = 0, totalCost = 0;
+
+    for (const f of validFunds) {
+        const navData = await fetchNav(f.code);
+        if (!navData || navData.length < 2) {
+            results.push({
+                code: f.code,
+                name: '获取失败',
+                shares: f.shares,
+                cost: f.cost,
+                nav: 0,
+                prevNav: 0,
+                date: '-',
+                profit: 0,
+                marketValue: 0,
+                accumProfit: 0,
+                accumRate: 0,
+                error: true
+            });
+            continue;
+        }
+
+        const latest = navData[0];
+        const prev = navData[1];
+        const nav = latest.nav;
+        const prevNav = prev.nav;
+        const date = latest.date;
+        const marketValue = nav * f.shares;
+        const profit = (nav - prevNav) * f.shares;
+        const accumProfit = marketValue - f.cost;
+        const accumRate = f.cost > 0 ? (accumProfit / f.cost) * 100 : 0;
+
+        results.push({
+            code: f.code,
+            name: f.name || f.code,
+            shares: f.shares,
+            cost: f.cost,
+            nav,
+            prevNav,
+            date,
+            profit,
+            marketValue,
+            accumProfit,
+            accumRate,
+            error: false
+        });
+
+        totalProfit += profit;
+        totalAccumProfit += accumProfit;
+        totalMarketValue += marketValue;
+        totalCost += f.cost;
+    }
+
+    const totalAccumRate = totalCost > 0 ? (totalAccumProfit / totalCost) * 100 : 0;
+    const summary = {
+        totalProfit,
+        totalAccumProfit,
+        totalAccumRate,
+        totalMarketValue,
+        totalCost
+    };
+
+    showResults(results, summary);
+    btn.disabled = false;
+    btn.innerHTML = '📈 计算收益';
+}
+
+// ============================================================
+// 初始化
+// ============================================================
+function init() {
+    funds = DEFAULT_FUNDS.map(f => ({ ...f }));
+    renderInputs();
+
+    document.getElementById('addBtn').addEventListener('click', () => {
+        funds.push({ code: '', shares: 0, cost: 0 });
+        renderInputs();
+        hideResults();
+    });
+
+    document.getElementById('calcBtn').addEventListener('click', calculate);
+
+    // 按回车键触发计算
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && e.target.closest('#fundList')) {
+            calculate();
+        }
+    });
+}
+
+init();
+</script>
+</body>
+</html>
